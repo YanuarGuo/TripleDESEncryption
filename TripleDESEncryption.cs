@@ -56,9 +56,8 @@ namespace TripleDESEncryption
 
         public static TripleDES CreateDes(string key)
         {
-            using MD5 md5 = MD5.Create();
             TripleDES des = TripleDES.Create();
-            var desKey = md5.ComputeHash(Encoding.UTF8.GetBytes(key));
+            var desKey = MD5.HashData(Encoding.UTF8.GetBytes(key));
             des.Key = desKey;
             des.IV = new byte[des.BlockSize / 8];
             des.Padding = PaddingMode.PKCS7;
