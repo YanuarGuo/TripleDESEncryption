@@ -25,10 +25,9 @@ cd your-repo
 
 ### **2. Open in Visual Studio**
 - Open the `.sln` file in **Visual Studio**.
-- Ensure you have **.NET Framework 4.7+** or **.NET 6+** installed.
+- Ensure you have **.NET 8 or Higher** installed.
 
 ### **3. Build & Run**
-- Press **F5** to compile and run the project.
 
 ---
 
