@@ -27,7 +27,6 @@ namespace TripleDESEncryption
             if (
                 string.IsNullOrEmpty(TxtKey1.Text)
                 || string.IsNullOrEmpty(TxtKey2.Text)
-                || string.IsNullOrEmpty(TxtKey3.Text)
                 || string.IsNullOrEmpty(CbMode3DES.Text)
                 || string.IsNullOrEmpty(CbPadding.Text)
                 || string.IsNullOrEmpty(CbCipherMode.Text)
@@ -36,10 +35,10 @@ namespace TripleDESEncryption
                 MessageBox.Show("Please enter all configurations!");
                 return;
             }
-            TDESMode = CbMode3DES.Text; // TDES-168 and TDES-112
+            TDESMode = CbMode3DES.Text;
             Key = TxtKey1.Text + TxtKey2.Text + TxtKey3.Text;
-            Padding = CbPadding.Text; // PKCS7 and ZeroPadding
-            Mode = CbCipherMode.Text; // CBC and ECB
+            Padding = CbPadding.Text;
+            Mode = CbCipherMode.Text;
             GbEnc.Enabled = true;
             GbDec.Enabled = true;
 
@@ -81,7 +80,6 @@ namespace TripleDESEncryption
                 TDESMode
             );
             TxtCipher.Text = encrypted;
-            MessageBox.Show("Encrypted text: " + encrypted);
         }
 
         private void BtnDecrypt_Click(object sender, EventArgs e)
@@ -107,7 +105,6 @@ namespace TripleDESEncryption
                 TDESMode
             );
             TxtPlain.Text = decrypted;
-            MessageBox.Show("Decrypted text: " + decrypted);
         }
 
         private void BtnClearEnc_Click(object sender, EventArgs e)
@@ -144,6 +141,7 @@ namespace TripleDESEncryption
         {
             if (CbMode3DES.Text == "TDES-112")
             {
+                TxtKey3.Text = "";
                 TxtKey3.Enabled = false;
             }
             else
@@ -152,17 +150,36 @@ namespace TripleDESEncryption
             }
         }
 
-        private static byte[] Generate3DESKey(byte[] keyBytes, string TDESMode)
+        private static byte[] Generate3DESKey(byte[] keyBytes, string TDESMode, string Padding)
         {
-            byte[] desKey = new byte[(TDESMode == "TDES-168") ? 24 : 16];
-            Array.Copy(keyBytes, desKey, Math.Min(keyBytes.Length, desKey.Length));
+            int keySize = TDESMode == "TDES-168" ? 24 : 16;
 
-            if (TDESMode == "TDES-112")
+            byte[] deskey = new byte[keySize];
+            Array.Copy(keyBytes, deskey, Math.Min(keyBytes.Length, keySize));
+
+            if (TDESMode == "TDES-112" && deskey.Length >= 24)
             {
-                Array.Copy(desKey, 0, desKey, 16, 8);
+                Array.Copy(deskey, 0, deskey, 16, 8);
             }
 
-            return desKey;
+            int padLength = keySize - keyBytes.Length;
+            if (padLength > 0)
+            {
+                if (Padding == "PKCS7")
+                {
+                    byte padByte = (byte)padLength;
+                    return deskey
+                        .Take(keySize - padLength)
+                        .Concat(Enumerable.Repeat(padByte, padLength))
+                        .ToArray();
+                }
+                else if (Padding == "ZeroPadding")
+                {
+                    return deskey.Take(keySize - padLength).Concat(new byte[padLength]).ToArray();
+                }
+            }
+
+            return deskey;
         }
 
         public static string TDESEncryption(
@@ -175,53 +192,73 @@ namespace TripleDESEncryption
             string TDESMode
         )
         {
-            using var provider = TripleDES.Create();
-
-            byte[] keyBytes = Generate3DESKey(Encoding.ASCII.GetBytes(Key), TDESMode);
-            Debug.WriteLine($"Key: {BitConverter.ToString(keyBytes)}");
-
-            provider.Key = keyBytes;
-            provider.Mode = CipherMode.ToUpper() switch
+            try
             {
-                "CBC" => System.Security.Cryptography.CipherMode.CBC,
-                "ECB" => System.Security.Cryptography.CipherMode.ECB,
-                _ => throw new ArgumentException(
-                    "Invalid Cipher Mode. Choose either 'CBC' or 'ECB'."
-                ),
-            };
+                using var provider = TripleDES.Create();
 
-            provider.Padding = Padding.ToUpper() switch
-            {
-                "PKCS7" => PaddingMode.PKCS7,
-                "ZEROPADDING" => PaddingMode.Zeros,
-                _ => throw new ArgumentException(
-                    "Invalid Padding. Choose either 'PKCS7' or 'ZeroPadding'."
-                ),
-            };
+                byte[] keyBytes = Generate3DESKey(Encoding.ASCII.GetBytes(Key), TDESMode, Padding);
+                Debug.WriteLine($"Key: {BitConverter.ToString(keyBytes)}");
 
-            if (provider.Mode == System.Security.Cryptography.CipherMode.CBC)
-            {
-                byte[] ivBytes = Encoding.ASCII.GetBytes(IV);
-                if (ivBytes.Length != 8)
-                    throw new ArgumentException("IV must be exactly 8 bytes long");
-                provider.IV = ivBytes;
+                provider.Key = keyBytes;
+                provider.Mode = CipherMode.ToUpper() switch
+                {
+                    "CBC" => System.Security.Cryptography.CipherMode.CBC,
+                    "ECB" => System.Security.Cryptography.CipherMode.ECB,
+                    _ => throw new ArgumentException(
+                        "Invalid Cipher Mode. Choose either 'CBC' or 'ECB'."
+                    ),
+                };
+
+                if (provider.Mode == System.Security.Cryptography.CipherMode.CBC)
+                {
+                    byte[] ivBytes = Encoding.ASCII.GetBytes(IV);
+                    if (ivBytes.Length != 8)
+                        throw new ArgumentException("IV must be exactly 8 bytes long");
+                    provider.IV = ivBytes;
+                }
+
+                using var ms = new MemoryStream();
+                using (
+                    var cs = new CryptoStream(
+                        ms,
+                        provider.CreateEncryptor(),
+                        CryptoStreamMode.Write
+                    )
+                )
+                {
+                    byte[] plainBytes = Encoding.ASCII.GetBytes(plainText);
+                    cs.Write(plainBytes, 0, plainBytes.Length);
+                    cs.FlushFinalBlock();
+                }
+
+                byte[] encryptedBytes = ms.ToArray();
+
+                return OutputFormat == "HEX"
+                    ? BitConverter.ToString(encryptedBytes).Replace("-", "")
+                    : Convert.ToBase64String(encryptedBytes);
             }
-
-            using var ms = new MemoryStream();
-            using (
-                var cs = new CryptoStream(ms, provider.CreateEncryptor(), CryptoStreamMode.Write)
-            )
+            catch (Exception ex)
             {
-                byte[] plainBytes = Encoding.ASCII.GetBytes(plainText);
-                cs.Write(plainBytes, 0, plainBytes.Length);
-                cs.FlushFinalBlock();
+                if (ex.Message.Contains("known weak key"))
+                {
+                    MessageBox.Show(
+                        "Error: The provided key is a known weak key for TripleDES and cannot be used.",
+                        "Weak Key Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"Encryption Error: {ex.Message}",
+                        "Encryption Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                }
+                return string.Empty;
             }
-
-            byte[] encryptedBytes = ms.ToArray();
-
-            return OutputFormat == "HEX"
-                ? BitConverter.ToString(encryptedBytes).Replace("-", "")
-                : Convert.ToBase64String(encryptedBytes);
         }
 
         public static string TDESDecryption(
@@ -236,7 +273,7 @@ namespace TripleDESEncryption
         {
             using var provider = TripleDES.Create();
 
-            byte[] keyBytes = Generate3DESKey(Encoding.ASCII.GetBytes(Key), TDESMode);
+            byte[] keyBytes = Generate3DESKey(Encoding.ASCII.GetBytes(Key), TDESMode, Padding);
             Debug.WriteLine($"Key: {BitConverter.ToString(keyBytes)}");
 
             provider.Key = keyBytes;
@@ -249,15 +286,6 @@ namespace TripleDESEncryption
                 ),
             };
 
-            provider.Padding = Padding.ToUpper() switch
-            {
-                "PKCS7" => PaddingMode.PKCS7,
-                "ZEROPADDING" => PaddingMode.Zeros,
-                _ => throw new ArgumentException(
-                    "Invalid Padding. Choose either 'PKCS7' or 'ZeroPadding'."
-                ),
-            };
-
             if (provider.Mode == System.Security.Cryptography.CipherMode.CBC)
             {
                 byte[] ivBytes = Encoding.ASCII.GetBytes(IV);
@@ -267,7 +295,7 @@ namespace TripleDESEncryption
             }
 
             byte[] encryptedBytes =
-                InputFormat.ToUpper() == "HEX"
+                InputFormat == "HEX"
                     ? ConvertHexToBytes(cipherText)
                     : Convert.FromBase64String(cipherText);
 
@@ -285,89 +313,59 @@ namespace TripleDESEncryption
 
         private static byte[] ConvertHexToBytes(string hex)
         {
-            byte[] bytes = new byte[hex.Length / 2];
-            for (int i = 0; i < bytes.Length; i++)
+            try
             {
-                bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+                if (string.IsNullOrWhiteSpace(hex))
+                {
+                    MessageBox.Show(
+                        "Error: Input HEX string is empty!",
+                        "Conversion Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    return Array.Empty<byte>();
+                }
+
+                if (hex.Length % 2 != 0)
+                {
+                    MessageBox.Show(
+                        "Error: HEX string length must be even!",
+                        "Conversion Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    return Array.Empty<byte>();
+                }
+
+                if (!System.Text.RegularExpressions.Regex.IsMatch(hex, "^[0-9A-Fa-f]+$"))
+                {
+                    MessageBox.Show(
+                        "Error: HEX string contains invalid characters!",
+                        "Conversion Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    return Array.Empty<byte>();
+                }
+
+                byte[] bytes = new byte[hex.Length / 2];
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+                }
+
+                return bytes;
             }
-            return bytes;
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Unexpected Error: {ex.Message}",
+                    "Conversion Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+                return Array.Empty<byte>();
+            }
         }
-
-        //public string TripleDesEncrypt(string plainText)
-        //{
-        //    if (string.IsNullOrEmpty(Key))
-        //        throw new ArgumentException("Key cannot be null or empty.");
-
-        //    var des = CreateDes168(Key);
-        //    var ct = des.CreateEncryptor();
-        //    var input = Encoding.UTF8.GetBytes(plainText);
-        //    var output = ct.TransformFinalBlock(input, 0, input.Length);
-        //    return Convert.ToBase64String(output);
-        //}
-
-        //public string TripleDesDecrypt(string cypherText)
-        //{
-        //    if (string.IsNullOrEmpty(Key))
-        //        throw new ArgumentException("Key cannot be null or empty.");
-
-        //    var des = CreateDes168(Key);
-        //    var ct = des.CreateDecryptor();
-        //    var input = Convert.FromBase64String(cypherText);
-        //    var output = ct.TransformFinalBlock(input, 0, input.Length);
-        //    return Encoding.UTF8.GetString(output);
-        //}
-
-        //public static TripleDES CreateDes168(string userKey)
-        //{
-        //    if (string.IsNullOrEmpty(userKey))
-        //        throw new ArgumentException("Key cannot be empty.");
-
-        //    TripleDES des = TripleDES.Create();
-
-        //    byte[] keyBytes = Encoding.UTF8.GetBytes(userKey);
-        //    byte[] desKey = new byte[24]; // 24 bytes for 168-bit security
-
-        //    for (int i = 0; i < desKey.Length; i++)
-        //        desKey[i] = i < keyBytes.Length ? keyBytes[i] : (byte)0x00;
-
-        //    des.Key = desKey;
-        //    des.IV = new byte[des.BlockSize / 8];
-        //    des.Padding = PaddingMode.PKCS7;
-        //    des.Mode = CipherMode.ECB;
-
-        //    return des;
-        //}
-
-        //public static TripleDES CreateDes112(string userKey)
-        //{
-        //    if (string.IsNullOrEmpty(userKey))
-        //        throw new ArgumentException("Key cannot be empty.");
-
-        //    TripleDES des = TripleDES.Create();
-
-        //    byte[] keyBytes = Encoding.UTF8.GetBytes(userKey);
-        //    byte[] desKey = new byte[16]; // 16 bytes for 112-bit security
-
-        //    for (int i = 0; i < desKey.Length; i++)
-        //        desKey[i] = i < keyBytes.Length ? keyBytes[i] : (byte)0x00;
-
-        //    des.Key = desKey;
-        //    des.IV = new byte[des.BlockSize / 8];
-        //    des.Padding = PaddingMode.PKCS7;
-        //    des.Mode = CipherMode.ECB;
-
-        //    return des;
-        //}
-
-        //public static TripleDES CreateDes(string key)
-        //{
-        //    TripleDES des = TripleDES.Create();
-        //    var desKey = MD5.HashData(Encoding.UTF8.GetBytes(key));
-        //    des.Key = desKey;
-        //    des.IV = new byte[des.BlockSize / 8];
-        //    des.Padding = PaddingMode.PKCS7;
-        //    des.Mode = CipherMode.ECB;
-        //    return des;
-        //}
     }
 }
