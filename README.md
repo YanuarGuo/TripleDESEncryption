@@ -20,7 +20,6 @@ This project implements **Triple DES (3DES) encryption and decryption** in C#. I
 ### **1. Clone the Repository**
 ```sh
 git clone https://github.com/YanuarGuo/TripleDESEncryption.git
-cd your-repo
 ```
 
 ### **2. Open in Visual Studio**
